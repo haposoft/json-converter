@@ -39,7 +39,7 @@ class GhostJsonConverter
             // Affter convert, Re-append data back to db
             $db['db'][0]['data'] = $data;
             // Write File
-            $newJsonString = json_encode($db, JSON_PRETTY_PRINT);
+            $newJsonString = json_encode($db, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
             // test
             // dd(__($newJsonString));
             file_put_contents(base_path(self::OUTPUT_FILE), $newJsonString);
@@ -107,6 +107,9 @@ class GhostJsonConverter
         // language -> locale
         $post = $this->changekey($post, 'language', 'locale');
 
+        // Set mobile doc
+        $post['mobiledoc'] = $this->buildMobileDocString($post['plaintext']);
+
         // set default author id (test)
         $post['author_id'] = '1';
         $post['id'] = uniqid();
@@ -158,5 +161,31 @@ class GhostJsonConverter
         $array[$newKey] = $array[$oldKey];
         unset($array[$oldKey]);
         return $array;
+    }
+
+    /**
+     * buildMobileDocString
+     *
+     * @param string $plainText
+     * @return string
+     */
+    public function buildMobileDocString(string $plainText): string
+    {
+        $mobiledoc= [
+            "atoms" => [],
+            "cards" => [
+                [
+                    "markdown",
+                    [
+                        "markdown" => $plainText
+                    ]
+                ]
+            ],
+            "ghostVersion"=>"4.0",
+            "markups" => [],
+            "sections" => [[10,0],[1,"p",[]]],
+            "version"=>"0.3.1"
+        ];
+        return json_encode($mobiledoc, JSON_UNESCAPED_UNICODE);
     }
 }
