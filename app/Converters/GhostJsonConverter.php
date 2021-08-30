@@ -9,6 +9,10 @@ class GhostJsonConverter
     const INPUT_FILE = 'storage/app/public/hapolog.ghost.2021-08-29.json';
     const OUTPUT_FILE = 'storage/app/public/hapolog.ghost.4.json';
 
+    protected $posts;
+    protected $users;
+    protected $tags;
+
     public function convert()
     {
         try {
@@ -26,14 +30,28 @@ class GhostJsonConverter
             $data = $this->removeUnnecessaryNodes($data);
 
             // Step 2: Convert user
-            // for ($i = 0; $i < count($data['users']); $i++) {
-            //     $data['users'][$i] = $this->convertUser($data['users'][$i]);
-            // }
+            for ($i = 0; $i < count($data['users']); $i++) {
+                $data['users'][$i] = $this->convertUser($data['users'][$i]);
+            }
+            $this->users = $data['users'];
+
             // Step 3: Convert post
             for ($i = 0; $i < count($data['posts']); $i++) {
                 $postResult = $this->convertPost($data['posts'][$i]);
                 $data['posts'][$i] = $postResult['post'];
                 $data['posts_authors'][] = $postResult['post_author'];
+            }
+            $this->posts = $data['posts'];
+
+            // Step 4: Convert tag
+            for ($i = 0; $i < count($data['tags']); $i++) {
+                $data['tags'][$i] = $this->convertTag($data['tags'][$i]);
+            }
+            $this->tags = $data['tags'];
+
+            // Step 5: Convert posts_tags (n-n relationship)
+            for ($i = 0; $i < count($data['posts_tags']); $i++) {
+                $data['posts_tags'][$i] = $this->convertPostTag($data['posts_tags'][$i]);
             }
 
             // Affter convert, Re-append data back to db
@@ -69,9 +87,6 @@ class GhostJsonConverter
         unset($data['roles']);
         unset($data['roles_users']);
         unset($data['settings']);
-        unset($data['tags']);
-        unset($data['users']);
-        unset($data['posts_tags']);
 
         return $data;
     }
@@ -84,6 +99,10 @@ class GhostJsonConverter
      */
     public function convertUser(array $user): array
     {
+        // backup old id
+        $user = $this->changekey($user, 'id', 'id_old');
+        // gennerate new id
+        $user['id'] = uniqid();
         // cover -> cover_img
         $user = $this->changekey($user, 'cover', 'cover_img');
         // image -> profile_image
@@ -107,11 +126,13 @@ class GhostJsonConverter
         // language -> locale
         $post = $this->changekey($post, 'language', 'locale');
 
+        // Backup id to id_old
+        $post = $this->changekey($post, 'id', 'id_old');
         // Set mobile doc
         $post['mobiledoc'] = $this->buildMobileDocString($post['plaintext']);
 
-        // set default author id (test)
-        $post['author_id'] = '1';
+        // get new author id
+        $post['author_id'] = $this->getNewId($this->users, $post['author_id']);
         $post['id'] = uniqid();
         $post['comment_id'] =  $post['id'];
 
@@ -125,7 +146,7 @@ class GhostJsonConverter
 
         $post['type'] = "post";
 
-        // remove: created_by, updated_by ...
+        // Remove unused: created_by, updated_by ...
         unset($post['created_by']);
         unset($post['updated_by']);
         unset($post['amp']);
@@ -134,11 +155,11 @@ class GhostJsonConverter
         unset($post['page']);
         unset($post['published_by']);
 
-        // Fake post author
+        // Map post_author
         $post_author = [
             'id' => uniqid(),
             'post_id' => $post['id'],
-            'author_id' => '1',
+            'author_id' => $post['author_id'],
             'sort_order' => 0
         ];
 
@@ -146,6 +167,36 @@ class GhostJsonConverter
             'post' => $post,
             'post_author' => $post_author
         ];
+    }
+
+    public function convertTag(array $tag): array
+    {
+        // backup id for build relationship
+        $tag = $this->changekey($tag, 'id', 'id_old');
+        // generate new key
+        $tag['id'] = uniqid();
+        // image -> feature_image
+        $tag = $this->changekey($tag, 'image', 'feature_image');
+
+        // remove: created_by, updated_by
+        unset($tag['created_by']);
+        unset($tag['updated_by']);
+        return $tag;
+    }
+
+    public function convertPostTag(array $postTag): array
+    {
+        // generate new id
+        $postTag['id'] = uniqid();
+        $postTag['post_id'] = $this->getNewId($this->posts, $postTag['post_id']);
+        $postTag['tag_id'] = $this->getNewId($this->tags, $postTag['tag_id']);
+        return $postTag;
+    }
+
+    public function getNewId(array $array, $idOld)
+    {
+        $key = array_search($idOld, array_column($array, 'id_old'));
+        return $array[$key]['id'];
     }
 
     /**
@@ -171,7 +222,7 @@ class GhostJsonConverter
      */
     public function buildMobileDocString(string $plainText): string
     {
-        $mobiledoc= [
+        $mobiledoc = [
             "atoms" => [],
             "cards" => [
                 [
@@ -181,10 +232,10 @@ class GhostJsonConverter
                     ]
                 ]
             ],
-            "ghostVersion"=>"4.0",
+            "ghostVersion" => "4.0",
             "markups" => [],
-            "sections" => [[10,0],[1,"p",[]]],
-            "version"=>"0.3.1"
+            "sections" => [[10, 0], [1, "p", []]],
+            "version" => "0.3.1"
         ];
         return json_encode($mobiledoc, JSON_UNESCAPED_UNICODE);
     }
